@@ -1,119 +1,92 @@
-#!/usr/bin/env python3
-import subprocess
-import sys
 import os
+import sys
 import time
-import argparse
+import subprocess
+from datetime import datetime
 
-banner = r"""
+def run_cmd(cmd):
+    print(f"[cmd] {cmd}")
+    subprocess.run(cmd, shell=True)
+
+def ensure_dir(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+def banner():
+    print(r"""
  ________   ___  ___   ________   ________   ___   ___   ________     
 |\   ____\ |\  \|\  \ |\   __  \ |\   __  \ |\  \ |\  \ |\   __  \    
-\ \  \___| \ \  \\\  \\ \  \|\  \\ \  \|\  \\ \  \\_\  \\ \  \|\  \   
+\ \  \___| \ \  \\\  \\ \  \|\  \\ \  \|\  \\ \  \\\_\  \\ \  \|\  \   
  \ \  \     \ \   __  \\ \  \\\  \\ \   _  _\\ \______  \\ \  \\\  \  
   \ \  \____ \ \  \ \  \\ \  \\\  \\ \  \\  \|\|_____|\  \\ \  \\\  \ 
    \ \_______\\ \__\ \__\\ \_______\\ \__\\ _\       \ \__\\ \_______\
     \|_______| \|__|\|__| \|_______| \|__|\|__|       \|__| \|_______|
+                            by chor4o
+    """)
 
-                             chor4o
-                             by chor4o
-"""
+if len(sys.argv) != 3 or sys.argv[1] not in ['-l', '-u']:
+    print("Usage: python robo.py -l domains.txt   # for list of domains")
+    print("       python robo.py -u domain.com     # for single domain")
+    sys.exit(1)
 
-def run_cmd(cmd, capture_output=False):
-    # Runs a shell command, returns output if requested
-    try:
-        if capture_output:
-            result = subprocess.run(cmd, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            return result.stdout.strip()
-        else:
-            subprocess.run(cmd, shell=True, check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"[!] Command failed: {cmd}")
-        print(e)
+banner()
 
-def ensure_log_dir():
-    if not os.path.exists("logs"):
-        os.makedirs("logs")
+if sys.argv[1] == '-l':
+    with open(sys.argv[2]) as f:
+        domains = [line.strip() for line in f if line.strip()]
+else:
+    domains = [sys.argv[2]]
 
-def process_domain(domain):
-    print(f"\n[+] Starting recon for: {domain}\n")
-    domain_log_prefix = f"logs/{domain}"
+time_tag = datetime.now().strftime("%Y%m%d_%H%M%S")
+base_log_dir = f"logs/recon_{time_tag}"
+ensure_dir(base_log_dir)
 
-    # Chaos to get URLs & subdomains
-    print("[*] Running Chaos...")
-    run_cmd(f"chaos -d {domain} -silent | anew {domain_log_prefix}_domains.txt")
-    time.sleep(5)
+for domain in domains:
+    print(f"\n[***] Starting recon on {domain}...")
 
-    # Subfinder to get subdomains
-    print("[*] Running Subfinder...")
-    run_cmd(f"echo {domain} | subfinder -all -silent | anew {domain_log_prefix}_domains.txt")
-    run_cmd(f"echo {domain} | subfinder -dL -silent | anew {domain_log_prefix}_domains.txt")
-    time.sleep(5)
+    domain_dir = os.path.join(base_log_dir, domain)
+    ensure_dir(domain_dir)
+    domain_log_prefix = os.path.join(domain_dir, domain)
 
-    # Gau for URLs
-    print("[*] Running Gau...")
-    run_cmd(f"gau {domain} | anew {domain_log_prefix}_urls.txt")
-    time.sleep(5)
+    # Chaos
+    run_cmd(f"chaos -d {domain} -silent | anew {domain_log_prefix}_chaos.txt")
 
-    # Katana crawl
-    print("[*] Running Katana on URLs...")
-    run_cmd(f"cat {domain_log_prefix}_urls.txt | katana -d 5 -silent | anew {domain_log_prefix}_crawled_urls.txt")
-    time.sleep(5)
+    # Subfinder
+    run_cmd(f"subfinder -d {domain} -all -silent | anew {domain_log_prefix}_subfinder.txt")
 
-    # SlicePathsURL on katana results
-    print("[*] Running SlicePathsURL...")
-    run_cmd(f"cat {domain_log_prefix}_crawled_urls.txt | slicepathsurl | anew {domain_log_prefix}_slicepaths.txt")
-    time.sleep(5)
+    # Combine domains and run httpx
+    run_cmd(f"cat {domain_log_prefix}_chaos.txt {domain_log_prefix}_subfinder.txt | anew {domain_log_prefix}_domains.txt")
+    run_cmd(f"cat {domain_log_prefix}_domains.txt | httpx -silent | anew {domain_log_prefix}_httpx_200.txt")
 
-    # Httpx to check alive domains
-    print("[*] Running Httpx to check alive hosts...")
-    run_cmd(f"cat {domain_log_prefix}_domains.txt | httpx -silent | anew {domain_log_prefix}_alive.txt")
-    time.sleep(5)
+    # Naabu
+    run_cmd(f"cat {domain_log_prefix}_domains.txt | naabu -silent | anew {domain_log_prefix}_ports.txt")
 
-    # Naabu port scanning
-    print("[*] Running Naabu port scan...")
-    run_cmd(f"cat {domain_log_prefix}_alive.txt | naabu -silent | anew {domain_log_prefix}_ports.txt")
-    time.sleep(5)
+    # Katana
+    run_cmd(f"cat {domain_log_prefix}_httpx_200.txt | katana -d 5 -silent | anew {domain_log_prefix}_katana.txt")
 
-    # Httpx + nuclei vulnerability scan
-    print("[*] Running Nuclei vulnerability scan...")
-    run_cmd(f"cat {domain_log_prefix}_ports.txt | httpx -silent | nuclei -severity low,medium,high,critical")
-    time.sleep(5)
+    # Gau
+    run_cmd(f"gau {domain} | anew {domain_log_prefix}_gau.txt")
 
-    # XSS candidates with gf and Dalfox
-    print("[*] Searching for XSS candidates...")
-    run_cmd(f"cat {domain_log_prefix}_crawled_urls.txt | gf xss | anew {domain_log_prefix}_xss_candidates.txt")
-    time.sleep(5)
-    print("[*] Running Dalfox XSS analysis...")
-    run_cmd(f"cat {domain_log_prefix}_xss_candidates.txt | dalfox pipe --skip-bav --mining-dom --deep-domxss --output-all --report --ignore-return -b 'https://chor4o.xss.ht/' --follow-redirects --output {domain_log_prefix}_dalfox_report.txt")
-    time.sleep(5)
+    # SlicePathsURL
+    run_cmd(f"cat {domain_log_prefix}_katana.txt {domain_log_prefix}_gau.txt | slicepathsurl | anew {domain_log_prefix}_sliced.txt")
 
-    # Katana file crawling (js, jsp, json)
-    print("[*] Running Katana file crawling...")
-    run_cmd(f"cat {domain_log_prefix}_alive.txt | katana -d 5 -silent -em js,jsp,json | anew {domain_log_prefix}_file_crawling.txt")
-    time.sleep(5)
+    # Unir e filtrar URLs com parâmetros
+    run_cmd(f"cat {domain_log_prefix}_katana.txt {domain_log_prefix}_gau.txt | anew {domain_log_prefix}_all_urls.txt")
+    run_cmd(f"cat {domain_log_prefix}_all_urls.txt | grep '?' | anew {domain_log_prefix}_param_urls.txt")
 
-    print(f"[+] Recon for {domain} completed. Logs saved in logs/{domain}_*.txt")
+    # gf xss
+    run_cmd(f"cat {domain_log_prefix}_param_urls.txt | gf xss | anew {domain_log_prefix}_xss_candidates.txt")
 
-def main():
-    parser = argparse.ArgumentParser(description="Chor4o Recon Robot for Bug Bounty")
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("-l", "--list", help="File containing list of domains, one per line")
-    group.add_argument("-u", "--url", help="Single domain to process")
-    args = parser.parse_args()
+    # qsreplace '<chorao>' + httpx
+    run_cmd(f"cat {domain_log_prefix}_xss_candidates.txt | qsreplace '<chorao>' | httpx -silent -ms '<chorao>' | anew {domain_log_prefix}_possible_xss1.txt")
 
-    print(banner)
-    ensure_log_dir()
+    # Open Redirect
+    run_cmd(f"cat {domain_log_prefix}_param_urls.txt | qsreplace 'https://evil.com' | httpx -silent -ms 'Location: https://evil.com' | anew {domain_log_prefix}_openredirects.txt")
 
-    if args.list:
-        if not os.path.isfile(args.list):
-            print(f"[!] List file '{args.list}' not found.")
-            sys.exit(1)
-        with open(args.list, "r") as f:
-            domains = [line.strip() for line in f if line.strip()]
-        for domain in domains:
-            process_domain(domain)
-    elif args.url:
-        process_domain(args.url)
+    # Dalfox (apenas URLs refletidas)
+    run_cmd(f"cat {domain_log_prefix}_possible_xss1.txt | dalfox pipe --skip-bav --mining-dom --deep-domxss --output-all --report --ignore-return --follow-redirects")
 
-if __name__ == "__main__":
-    main()
+    # Crawling de JS/JSON/JSP
+    run_cmd(f"cat {domain_log_prefix}_httpx_200.txt | katana -d 5 -silent -em js,jsp,json | anew {domain_log_prefix}_files.txt")
+
+print("\n[*] Recon complete for all domains.")
