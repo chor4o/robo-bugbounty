@@ -89,4 +89,8 @@ for domain in domains:
     # Crawling de JS/JSON/JSP
     run_cmd(f"cat {domain_log_prefix}_httpx_200.txt | katana -d 5 -silent -em js,jsp,json | anew {domain_log_prefix}_files.txt")
 
+    # Nuclei (em cima das URLs ativas + naabu)
+    run_cmd(f"cat {domain_log_prefix}_httpx_200.txt {domain_log_prefix}_ports.txt | anew {domain_log_prefix}_nuclei_targets.txt")
+    run_cmd(f"cat {domain_log_prefix}_nuclei_targets.txt | nuclei -severity low,medium,high,critical")
+
 print("\n[*] Recon complete for all domains.")
