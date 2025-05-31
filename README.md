@@ -1,6 +1,7 @@
 # chor4o Recon Robot
 
 Automate your bug bounty reconnaissance process with the Chor4o Recon Robot!
+
 This Python script performs a complete workflow of subdomain and URL gathering, enumeration, and analysis using the main bug bounty recon tools, generating organized logs per domain.
 
 ---
@@ -39,9 +40,16 @@ This Python script performs a complete workflow of subdomain and URL gathering, 
 
 ## Usage
 
-1. Prepare a file with target domains, one domain per line, e.g. `domains.txt`
+The script accepts two mutually exclusive options:
 
-2. Run the script:
+- `-l <file>` : Provide a file containing a list of target domains, one per line.
+- `-u <domain>` : Provide a single domain as a target.
+
+Examples:
+
+1. Running with a list of domains:
 
 ```bash
-python robo.py domains.txt
+python robo.py -l domains.txt
+
+By chor4o
