@@ -22,6 +22,7 @@ def banner():
    \ \_______\\ \__\ \__\\ \_______\\ \__\\ _\       \ \__\\ \_______\
     \|_______| \|__|\|__| \|_______| \|__|\|__|       \|__| \|_______|
                             by chor4o
+                         version 1.0.2
     """)
 
 if len(sys.argv) != 3 or sys.argv[1] not in ['-l', '-u']:
@@ -44,9 +45,10 @@ ensure_dir(base_log_dir)
 for domain in domains:
     print(f"\n[***] Starting recon on {domain}...")
 
-    domain_dir = os.path.join(base_log_dir, domain)
+    clean_domain = domain.replace("https://", "").replace("http://", "").replace("/", "")
+    domain_dir = os.path.join(base_log_dir, clean_domain)
     ensure_dir(domain_dir)
-    domain_log_prefix = os.path.join(domain_dir, domain)
+    domain_log_prefix = os.path.join(domain_dir, clean_domain)
 
     # Chaos
     run_cmd(f"chaos -d {domain} -silent | anew {domain_log_prefix}_chaos.txt")
@@ -57,6 +59,11 @@ for domain in domains:
     # Combine domains and run httpx
     run_cmd(f"cat {domain_log_prefix}_chaos.txt {domain_log_prefix}_subfinder.txt | anew {domain_log_prefix}_domains.txt")
     run_cmd(f"cat {domain_log_prefix}_domains.txt | httpx -silent | anew {domain_log_prefix}_httpx_200.txt")
+
+    # Apenas continua se houver URLs ativas
+    if not os.path.exists(f"{domain_log_prefix}_httpx_200.txt") or os.path.getsize(f"{domain_log_prefix}_httpx_200.txt") == 0:
+        print(f"[!] Skipping {domain} — no active URLs found.")
+        continue
 
     # Naabu
     run_cmd(f"cat {domain_log_prefix}_domains.txt | naabu -silent | anew {domain_log_prefix}_ports.txt")
@@ -83,14 +90,20 @@ for domain in domains:
     # Open Redirect
     run_cmd(f"cat {domain_log_prefix}_param_urls.txt | qsreplace 'https://evil.com' | httpx -silent -ms 'Location: https://evil.com' | anew {domain_log_prefix}_openredirects.txt")
 
-    # Dalfox (apenas URLs refletidas)
-    run_cmd(f"cat {domain_log_prefix}_possible_xss1.txt | dalfox pipe --skip-bav --mining-dom --deep-domxss --output-all --report --ignore-return --follow-redirects")
+    # Dalfox (após combinar e limpar as URLs com parâmetro)
+    if os.path.exists(f"{domain_log_prefix}_possible_xss1.txt") and os.path.getsize(f"{domain_log_prefix}_possible_xss1.txt") > 0:
+        run_cmd(f"cat {domain_log_prefix}_possible_xss1.txt | dalfox pipe --skip-bav --mining-dom --deep-domxss --output-all --report --ignore-return --follow-redirects")
+    else:
+        print(f"[!] Skipping Dalfox for {domain} — no XSS candidates found.")
 
     # Crawling de JS/JSON/JSP
     run_cmd(f"cat {domain_log_prefix}_httpx_200.txt | katana -d 5 -silent -em js,jsp,json | anew {domain_log_prefix}_files.txt")
 
     # Nuclei (em cima das URLs ativas + naabu)
     run_cmd(f"cat {domain_log_prefix}_httpx_200.txt {domain_log_prefix}_ports.txt | anew {domain_log_prefix}_nuclei_targets.txt")
-    run_cmd(f"cat {domain_log_prefix}_nuclei_targets.txt | nuclei -severity low,medium,high,critical")
+    if os.path.exists(f"{domain_log_prefix}_nuclei_targets.txt") and os.path.getsize(f"{domain_log_prefix}_nuclei_targets.txt") > 0:
+        run_cmd(f"cat {domain_log_prefix}_nuclei_targets.txt | nuclei -severity low,medium,high,critical")
+    else:
+        print(f"[!] Skipping Nuclei for {domain} — no valid targets found.")
 
 print("\n[*] Recon complete for all domains.")
